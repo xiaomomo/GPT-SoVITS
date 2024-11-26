@@ -3,8 +3,10 @@ import sys,os
 import torch
 
 # 推理用的指定模型
-sovits_path = ""
+# sovits_path = ""
 gpt_path = ""
+sovits_path = "SoVITS_weights_v2/blippi_v3_e8_s184.pth"
+gpt_path = "GPT_weights_v2/blippi_v3-e15.ckpt"
 is_half_str = os.environ.get("is_half", "True")
 is_half = True if is_half_str.lower() == 'true' else False
 is_share_str = os.environ.get("is_share","False")
@@ -12,8 +14,15 @@ is_share= True if is_share_str.lower() == 'true' else False
 
 cnhubert_path = "GPT_SoVITS/pretrained_models/chinese-hubert-base"
 bert_path = "GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large"
-pretrained_sovits_path = "GPT_SoVITS/pretrained_models/s2G488k.pth"
-pretrained_gpt_path = "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt"
+# pretrained_sovits_path = "GPT_SoVITS/pretrained_models/s2G488k.pth"
+# pretrained_gpt_path = "GPT_SoVITS/pretrained_models/s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt"
+pretrained_sovits_path = "SoVITS_weights_v2/blippi_v2_e8_s208.pth"
+# pretrained_gpt_path = "SoVITS_weights_v2/blippi_v2_e8_s208.pth"
+pretrained_gpt_path = "GPT_weights_v2/blippi_v3-e15.ckpt"
+
+# pretrained_sovits_path = "SoVITS_weights_v2/littlepony_e4_s908.pth"
+# pretrained_gpt_path = "GPT_weights_v2/littlepony-e15.ckpt"
+
 
 exp_root = "logs"
 python_exec = sys.executable or "python"

@@ -171,6 +171,7 @@ from tools.my_utils import load_audio
 import config as global_config
 import logging
 import subprocess
+from fastapi.middleware.cors import CORSMiddleware
 
 
 class DefaultRefer:
@@ -853,6 +854,15 @@ change_gpt_sovits_weights(gpt_path = gpt_path, sovits_path = sovits_path)
 # 接口部分
 # --------------------------------
 app = FastAPI()
+# 添加 CORS 中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许哪些源访问你的API
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许哪些HTTP方法：POST, GET, DELETE 等等
+    allow_headers=["*"],  # 允许哪些HTTP头
+)
+
 
 @app.post("/set_model")
 async def set_model(request: Request):
