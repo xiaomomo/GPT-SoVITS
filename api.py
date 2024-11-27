@@ -558,106 +558,118 @@ def only_punc(text):
 
 splits = {"，", "。", "？", "！", ",", ".", "?", "!", "~", ":", "：", "—", "…", }
 def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language, top_k= 15, top_p = 0.6, temperature = 0.6, speed = 1, inp_refs = None, spk = "default"):
-    infer_sovits = speaker_list[spk].sovits
-    vq_model = infer_sovits.vq_model
-    hps = infer_sovits.hps
+    try:
+        infer_sovits = speaker_list[spk].sovits
+        vq_model = infer_sovits.vq_model
+        hps = infer_sovits.hps
 
-    infer_gpt = speaker_list[spk].gpt
-    t2s_model = infer_gpt.t2s_model
-    max_sec = infer_gpt.max_sec
+        infer_gpt = speaker_list[spk].gpt
+        t2s_model = infer_gpt.t2s_model
+        max_sec = infer_gpt.max_sec
 
-    t0 = ttime()
-    prompt_text = prompt_text.strip("\n")
-    if (prompt_text[-1] not in splits): prompt_text += "。" if prompt_language != "en" else "."
-    prompt_language, text = prompt_language, text.strip("\n")
-    dtype = torch.float16 if is_half == True else torch.float32
-    zero_wav = np.zeros(int(hps.data.sampling_rate * 0.3), dtype=np.float16 if is_half == True else np.float32)
-    with torch.no_grad():
-        wav16k, sr = librosa.load(ref_wav_path, sr=16000)
-        wav16k = torch.from_numpy(wav16k)
-        zero_wav_torch = torch.from_numpy(zero_wav)
-        if (is_half == True):
-            wav16k = wav16k.half().to(device)
-            zero_wav_torch = zero_wav_torch.half().to(device)
-        else:
-            wav16k = wav16k.to(device)
-            zero_wav_torch = zero_wav_torch.to(device)
-        wav16k = torch.cat([wav16k, zero_wav_torch])
-        ssl_content = ssl_model.model(wav16k.unsqueeze(0))["last_hidden_state"].transpose(1, 2)  # .float()
-        codes = vq_model.extract_latent(ssl_content)
-        prompt_semantic = codes[0, 0]
-        prompt = prompt_semantic.unsqueeze(0).to(device)
-
-        refers=[]
-        if(inp_refs):
-            for path in inp_refs:
-                try:
-                    refer = get_spepc(hps, path).to(dtype).to(device)
-                    refers.append(refer)
-                except Exception as e:
-                    logger.error(e)
-        if(len(refers)==0):
-            refers = [get_spepc(hps, ref_wav_path).to(dtype).to(device)]
-
-    t1 = ttime()
-    version = vq_model.version
-    os.environ['version'] = version
-    prompt_language = dict_language[prompt_language.lower()]
-    text_language = dict_language[text_language.lower()]
-    phones1, bert1, norm_text1 = get_phones_and_bert(prompt_text, prompt_language, version)
-    texts = text.split("\n")
-    audio_bytes = BytesIO()
-
-    for text in texts:
-        # 简单防止纯符号引发参考音频泄露
-        if only_punc(text):
-            continue
-
-        audio_opt = []
-        if (text[-1] not in splits): text += "。" if text_language != "en" else "."
-        phones2, bert2, norm_text2 = get_phones_and_bert(text, text_language, version)
-        bert = torch.cat([bert1, bert2], 1)
-
-        all_phoneme_ids = torch.LongTensor(phones1 + phones2).to(device).unsqueeze(0)
-        bert = bert.to(device).unsqueeze(0)
-        all_phoneme_len = torch.tensor([all_phoneme_ids.shape[-1]]).to(device)
-        t2 = ttime()
+        t0 = ttime()
+        prompt_text = prompt_text.strip("\n")
+        if (prompt_text[-1] not in splits): prompt_text += "。" if prompt_language != "en" else "."
+        prompt_language, text = prompt_language, text.strip("\n")
+        dtype = torch.float16 if is_half == True else torch.float32
+        zero_wav = np.zeros(int(hps.data.sampling_rate * 0.3), dtype=np.float16 if is_half == True else np.float32)
         with torch.no_grad():
-            pred_semantic, idx = t2s_model.model.infer_panel(
-                all_phoneme_ids,
-                all_phoneme_len,
-                prompt,
-                bert,
-                # prompt_phone_len=ph_offset,
-                top_k = top_k,
-                top_p = top_p,
-                temperature = temperature,
-                early_stop_num=hz * max_sec)
-            pred_semantic = pred_semantic[:, -idx:].unsqueeze(0)
-        t3 = ttime()
-        audio = \
-            vq_model.decode(pred_semantic, torch.LongTensor(phones2).to(device).unsqueeze(0),
-                            refers,speed=speed).detach().cpu().numpy()[
+            wav16k, sr = librosa.load(ref_wav_path, sr=16000)
+            wav16k = torch.from_numpy(wav16k)
+            zero_wav_torch = torch.from_numpy(zero_wav)
+            if (is_half == True):
+                wav16k = wav16k.half().to(device)
+                zero_wav_torch = zero_wav_torch.half().to(device)
+            else:
+                wav16k = wav16k.to(device)
+                zero_wav_torch = zero_wav_torch.to(device)
+            wav16k = torch.cat([wav16k, zero_wav_torch])
+            ssl_content = ssl_model.model(wav16k.unsqueeze(0))["last_hidden_state"].transpose(1, 2)  # .float()
+            codes = vq_model.extract_latent(ssl_content)
+            prompt_semantic = codes[0, 0]
+            prompt = prompt_semantic.unsqueeze(0).to(device)
+
+            refers=[]
+            if(inp_refs):
+                for path in inp_refs:
+                    try:
+                        refer = get_spepc(hps, path).to(dtype).to(device)
+                        refers.append(refer)
+                    except Exception as e:
+                        logger.error(e)
+            if(len(refers)==0):
+                refers = [get_spepc(hps, ref_wav_path).to(dtype).to(device)]
+
+        t1 = ttime()
+        version = vq_model.version
+        os.environ['version'] = version
+        prompt_language = dict_language[prompt_language.lower()]
+        text_language = dict_language[text_language.lower()]
+        phones1, bert1, norm_text1 = get_phones_and_bert(prompt_text, prompt_language, version)
+        texts = text.split("\n")
+        audio_bytes = BytesIO()
+
+        for text in texts:
+            # 简单防止纯符号引发参考音频泄露
+            if only_punc(text):
+                continue
+
+            audio_opt = []
+            if (text[-1] not in splits): text += "。" if text_language != "en" else "."
+            phones2, bert2, norm_text2 = get_phones_and_bert(text, text_language, version)
+            bert = torch.cat([bert1, bert2], 1)
+
+            all_phoneme_ids = torch.LongTensor(phones1 + phones2).to(device).unsqueeze(0)
+            bert = bert.to(device).unsqueeze(0)
+            all_phoneme_len = torch.tensor([all_phoneme_ids.shape[-1]]).to(device)
+            t2 = ttime()
+            with torch.no_grad():
+                pred_semantic, idx = t2s_model.model.infer_panel(
+                    all_phoneme_ids,
+                    all_phoneme_len,
+                    prompt,
+                    bert,
+                    # prompt_phone_len=ph_offset,
+                    top_k = top_k,
+                    top_p = top_p,
+                    temperature = temperature,
+                    early_stop_num=hz * max_sec)
+                pred_semantic = pred_semantic[:, -idx:].unsqueeze(0)
+            t3 = ttime()
+            audio = \
+                vq_model.decode(pred_semantic, torch.LongTensor(phones2).to(device).unsqueeze(0),
+                    refers,speed=speed).detach().cpu().numpy()[
                 0, 0]  ###试试重建不带上prompt部分
-        max_audio=np.abs(audio).max()
-        if max_audio>1:
-            audio/=max_audio
-        audio_opt.append(audio)
-        audio_opt.append(zero_wav)
-        t4 = ttime()
-        if is_int32:
-            audio_bytes = pack_audio(audio_bytes,(np.concatenate(audio_opt, 0) * 2147483647).astype(np.int32),hps.data.sampling_rate)
-        else:
-            audio_bytes = pack_audio(audio_bytes,(np.concatenate(audio_opt, 0) * 32768).astype(np.int16),hps.data.sampling_rate)
-    # logger.info("%.3f\t%.3f\t%.3f\t%.3f" % (t1 - t0, t2 - t1, t3 - t2, t4 - t3))
-        if stream_mode == "normal":
-            audio_bytes, audio_chunk = read_clean_buffer(audio_bytes)
-            yield audio_chunk
-    
-    if not stream_mode == "normal": 
-        if media_type == "wav":
-            audio_bytes = pack_wav(audio_bytes,hps.data.sampling_rate)
-        yield audio_bytes.getvalue()
+            max_audio=np.abs(audio).max()
+            if max_audio>1:
+                audio/=max_audio
+            audio_opt.append(audio)
+            audio_opt.append(zero_wav)
+            t4 = ttime()
+            if is_int32:
+                audio_bytes = pack_audio(audio_bytes,(np.concatenate(audio_opt, 0) * 2147483647).astype(np.int32),hps.data.sampling_rate)
+            else:
+                audio_bytes = pack_audio(audio_bytes,(np.concatenate(audio_opt, 0) * 32768).astype(np.int16),hps.data.sampling_rate)
+        # logger.info("%.3f\t%.3f\t%.3f\t%.3f" % (t1 - t0, t2 - t1, t3 - t2, t4 - t3))
+            if stream_mode == "normal":
+                try:
+                    audio_bytes, audio_chunk = read_clean_buffer(audio_bytes)
+                    yield audio_chunk
+                except Exception as e:
+                    logger.error(f"Streaming error: {str(e)}")
+                    break
+        
+        if not stream_mode == "normal": 
+            try:
+                if media_type == "wav":
+                    audio_bytes = pack_wav(audio_bytes,hps.data.sampling_rate)
+                yield audio_bytes.getvalue()
+            except Exception as e:
+                logger.error(f"Final audio processing error: {str(e)}")
+                
+    except Exception as e:
+        logger.error(f"TTS processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
@@ -690,33 +702,44 @@ def handle_change(path, text, language):
 
 
 def handle(refer_wav_path, prompt_text, prompt_language, text, text_language, cut_punc, top_k, top_p, temperature, speed, inp_refs, speaker_name="default"):
-    # 验证speaker是否存在
-    if speaker_name not in speaker_list:
-        return JSONResponse({"code": 404, "message": f"Speaker {speaker_name} not found"}, status_code=404)
-        
-    if (
-            refer_wav_path == "" or refer_wav_path is None
-            or prompt_text == "" or prompt_text is None
-            or prompt_language == "" or prompt_language is None
-    ):
-        refer_wav_path, prompt_text, prompt_language = (
-            default_refer.path,
-            default_refer.text,
-            default_refer.language,
+    try:
+        # Validation checks
+        if speaker_name not in speaker_list:
+            return JSONResponse({"code": 404, "message": f"Speaker {speaker_name} not found"}, status_code=404)
+            
+        if (
+                refer_wav_path == "" or refer_wav_path is None
+                or prompt_text == "" or prompt_text is None
+                or prompt_language == "" or prompt_language is None
+        ):
+            refer_wav_path, prompt_text, prompt_language = (
+                default_refer.path,
+                default_refer.text,
+                default_refer.language,
+            )
+            if not default_refer.is_ready():
+                return JSONResponse({"code": 400, "message": "未指定参考音频且接口无预设"}, status_code=400)
+
+        if cut_punc == None:
+            text = cut_text(text, default_cut_punc)
+        else:
+            text = cut_text(text, cut_punc)
+
+        # Create streaming response with error handling
+        return StreamingResponse(
+            get_tts_wav(
+                refer_wav_path, prompt_text, prompt_language, text, text_language,
+                top_k, top_p, temperature, speed, inp_refs, speaker_name
+            ),
+            media_type="audio/"+media_type,
+            headers={"Access-Control-Allow-Origin": "*"}
         )
-        if not default_refer.is_ready():
-            return JSONResponse({"code": 400, "message": "未指定参考音频且接口无预设"}, status_code=400)
-
-    if cut_punc == None:
-        text = cut_text(text,default_cut_punc)
-    else:
-        text = cut_text(text,cut_punc)
-
-    return StreamingResponse(
-        get_tts_wav(refer_wav_path, prompt_text, prompt_language, text, text_language, 
-                   top_k, top_p, temperature, speed, inp_refs, speaker_name), 
-        media_type="audio/"+media_type
-    )
+    except Exception as e:
+        logger.error(f"Request handling error: {str(e)}")
+        return JSONResponse(
+            {"code": 500, "message": f"Internal server error: {str(e)}"}, 
+            status_code=500
+        )
 
 
 
@@ -767,7 +790,7 @@ parser.add_argument("-dl", "--default_refer_language", type=str, default="", hel
 parser.add_argument("-d", "--device", type=str, default=g_config.infer_device, help="cuda / cpu")
 parser.add_argument("-a", "--bind_addr", type=str, default="0.0.0.0", help="default: 0.0.0.0")
 parser.add_argument("-p", "--port", type=int, default=g_config.api_port, help="default: 9880")
-parser.add_argument("-fp", "--full_precision", action="store_true", default=False, help="覆盖config.is_half为False, ��用全精度")
+parser.add_argument("-fp", "--full_precision", action="store_true", default=False, help="覆盖config.is_half为False, 用全精度")
 parser.add_argument("-hp", "--half_precision", action="store_true", default=False, help="覆盖config.is_half为True, 使用半精度")
 # bool值的用法为 `python ./api.py -fp ...`
 # 此时 full_precision==True, half_precision==False
@@ -845,8 +868,8 @@ else:
 
 # 在初始化模型之前添加以下代码
 def load_model_pairs():
-    gpt_dir = "GPT_weights_v2"
-    sovits_dir = "SoVITS_weight_v2"
+    gpt_dir = "./GPT_weights_v2"
+    sovits_dir = "./SoVITS_weights_v2"
     
     # 确保目录存在
     if not os.path.exists(gpt_dir) or not os.path.exists(sovits_dir):
