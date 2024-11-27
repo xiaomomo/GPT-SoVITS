@@ -267,15 +267,15 @@ def get_gpt_weights(gpt_path):
     gpt = Gpt(max_sec, t2s_model)
     return gpt
 
-def change_gpt_sovits_weights(gpt_path,sovits_path):
+def change_gpt_sovits_weights(gpt_path,sovits_path, speaker_name="default"):
     try:
         gpt = get_gpt_weights(gpt_path)
         sovits = get_sovits_weights(sovits_path)
     except Exception as e:
         return JSONResponse({"code": 400, "message": str(e)}, status_code=400)
 
-    speaker_list["default"] = Speaker(name="default", gpt=gpt, sovits=sovits)
-    return JSONResponse({"code": 0, "message": "Success"}, status_code=200)
+    speaker_list[speaker_name] = Speaker(name=speaker_name, gpt=gpt, sovits=sovits)
+    return JSONResponse({"code": 0, "message": f"Success: Added/Updated speaker {speaker_name}"}, status_code=200)
 
 
 def get_bert_feature(text, word2ph):
@@ -689,7 +689,11 @@ def handle_change(path, text, language):
     return JSONResponse({"code": 0, "message": "Success"}, status_code=200)
 
 
-def handle(refer_wav_path, prompt_text, prompt_language, text, text_language, cut_punc, top_k, top_p, temperature, speed, inp_refs):
+def handle(refer_wav_path, prompt_text, prompt_language, text, text_language, cut_punc, top_k, top_p, temperature, speed, inp_refs, speaker_name="default"):
+    # 验证speaker是否存在
+    if speaker_name not in speaker_list:
+        return JSONResponse({"code": 404, "message": f"Speaker {speaker_name} not found"}, status_code=404)
+        
     if (
             refer_wav_path == "" or refer_wav_path is None
             or prompt_text == "" or prompt_text is None
@@ -708,7 +712,11 @@ def handle(refer_wav_path, prompt_text, prompt_language, text, text_language, cu
     else:
         text = cut_text(text,cut_punc)
 
-    return StreamingResponse(get_tts_wav(refer_wav_path, prompt_text, prompt_language, text, text_language, top_k, top_p, temperature, speed, inp_refs), media_type="audio/"+media_type)
+    return StreamingResponse(
+        get_tts_wav(refer_wav_path, prompt_text, prompt_language, text, text_language, 
+                   top_k, top_p, temperature, speed, inp_refs, speaker_name), 
+        media_type="audio/"+media_type
+    )
 
 
 
@@ -759,7 +767,7 @@ parser.add_argument("-dl", "--default_refer_language", type=str, default="", hel
 parser.add_argument("-d", "--device", type=str, default=g_config.infer_device, help="cuda / cpu")
 parser.add_argument("-a", "--bind_addr", type=str, default="0.0.0.0", help="default: 0.0.0.0")
 parser.add_argument("-p", "--port", type=int, default=g_config.api_port, help="default: 9880")
-parser.add_argument("-fp", "--full_precision", action="store_true", default=False, help="覆盖config.is_half为False, 使用全精度")
+parser.add_argument("-fp", "--full_precision", action="store_true", default=False, help="覆盖config.is_half为False, ��用全精度")
 parser.add_argument("-hp", "--half_precision", action="store_true", default=False, help="覆盖config.is_half为True, 使用半精度")
 # bool值的用法为 `python ./api.py -fp ...`
 # 此时 full_precision==True, half_precision==False
@@ -835,6 +843,49 @@ else:
     is_int32 = False
     logger.info(f"数据类型: int16")
 
+# 在初始化模型之前添加以下代码
+def load_model_pairs():
+    gpt_dir = "GPT_weights_v2"
+    sovits_dir = "SoVITS_weight_v2"
+    
+    # 确保目录存在
+    if not os.path.exists(gpt_dir) or not os.path.exists(sovits_dir):
+        logger.warn(f"模型目录不存在: {gpt_dir} 或 {sovits_dir}")
+        return
+    
+    # 获取所有模型文件
+    gpt_models = [f for f in os.listdir(gpt_dir) if f.endswith('.ckpt')]
+    sovits_models = [f for f in os.listdir(sovits_dir) if f.endswith('.pth')]
+    
+    # 尝试匹配模型名称并加载
+    for gpt_model in gpt_models:
+        # 移除文件扩展名和可能的前缀
+        base_name = gpt_model.replace('.ckpt', '').split('-e')[0]
+        
+        # 查找对应的SoVITS模型
+        matching_sovits = [s for s in sovits_models if base_name in s]
+        if matching_sovits:
+            sovits_model = matching_sovits[0]
+            speaker_name = base_name
+            
+            try:
+                logger.info(f"正在加载模型对: {speaker_name}")
+                logger.info(f"GPT模型: {gpt_model}")
+                logger.info(f"SoVITS模型: {sovits_model}")
+                
+                gpt_path = os.path.join(gpt_dir, gpt_model)
+                sovits_path = os.path.join(sovits_dir, sovits_model)
+                
+                # 加载模型对
+                change_gpt_sovits_weights(
+                    gpt_path=gpt_path,
+                    sovits_path=sovits_path,
+                    speaker_name=speaker_name
+                )
+                logger.info(f"成功加载模型对: {speaker_name}")
+            except Exception as e:
+                logger.error(f"加载模型对 {speaker_name} 失败: {str(e)}")
+
 # 初始化模型
 cnhubert.cnhubert_base_path = cnhubert_base_path
 tokenizer = AutoTokenizer.from_pretrained(bert_path)
@@ -846,7 +897,12 @@ if is_half:
 else:
     bert_model = bert_model.to(device)
     ssl_model = ssl_model.to(device)
-change_gpt_sovits_weights(gpt_path = gpt_path, sovits_path = sovits_path)
+
+# 加载默认模型
+change_gpt_sovits_weights(gpt_path=gpt_path, sovits_path=sovits_path)
+
+# 加载目录中的其他模型对
+load_model_pairs()
 
 
 
@@ -869,7 +925,8 @@ async def set_model(request: Request):
     json_post_raw = await request.json()
     return change_gpt_sovits_weights(
         gpt_path = json_post_raw.get("gpt_model_path"), 
-        sovits_path = json_post_raw.get("sovits_model_path")
+        sovits_path = json_post_raw.get("sovits_model_path"),
+        speaker_name = json_post_raw.get("speaker_name", "default")
     )
 
 
@@ -877,8 +934,13 @@ async def set_model(request: Request):
 async def set_model(
         gpt_model_path: str = None,
         sovits_model_path: str = None,
+        speaker_name: str = "default"
 ):
-    return change_gpt_sovits_weights(gpt_path = gpt_model_path, sovits_path = sovits_model_path)
+    return change_gpt_sovits_weights(
+        gpt_path = gpt_model_path, 
+        sovits_path = sovits_model_path,
+        speaker_name = speaker_name
+    )
 
 
 @app.post("/control")
@@ -925,7 +987,8 @@ async def tts_endpoint(request: Request):
         json_post_raw.get("top_p", 1.0),
         json_post_raw.get("temperature", 1.0),
         json_post_raw.get("speed", 1.0),
-        json_post_raw.get("inp_refs", [])
+        json_post_raw.get("inp_refs", []),
+        json_post_raw.get("speaker_name", "default")
     )
 
 
@@ -941,9 +1004,31 @@ async def tts_endpoint(
         top_p: float = 1.0,
         temperature: float = 1.0,
         speed: float = 1.0,
-        inp_refs: list = Query(default=[])
+        inp_refs: list = Query(default=[]),
+        speaker_name: str = "default"
 ):
-    return handle(refer_wav_path, prompt_text, prompt_language, text, text_language, cut_punc, top_k, top_p, temperature, speed, inp_refs)
+    return handle(
+        refer_wav_path, prompt_text, prompt_language, text, text_language, 
+        cut_punc, top_k, top_p, temperature, speed, inp_refs, speaker_name
+    )
+
+
+@app.get("/speakers")
+async def list_speakers():
+    return JSONResponse({
+        "code": 0,
+        "speakers": list(speaker_list.keys())
+    })
+
+@app.delete("/speakers/{speaker_name}")
+async def delete_speaker(speaker_name: str):
+    if speaker_name == "default":
+        return JSONResponse({"code": 400, "message": "Cannot delete default speaker"}, status_code=400)
+    
+    if speaker_name in speaker_list:
+        del speaker_list[speaker_name]
+        return JSONResponse({"code": 0, "message": f"Speaker {speaker_name} deleted"})
+    return JSONResponse({"code": 404, "message": "Speaker not found"}, status_code=404)
 
 
 if __name__ == "__main__":
